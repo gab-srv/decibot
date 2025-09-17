@@ -38,13 +38,14 @@ codes = {"Sevenans": "1709", "Belfort": "1705"}
 def load_reservations():
     return sheet.get_all_records()
 
-def add_reservation(res_id, user_id, salle, date, heure, duree):
-    sheet.append_row([res_id, user_id, salle, date, heure, duree])
+def add_reservation(res_id, user_id, username, salle, date, heure, duree):
+    # Forcer l'ID en string pour éviter les problèmes
+    sheet.append_row([str(res_id), str(user_id), username, salle, date, heure, str(duree)])
 
 def delete_reservation(res_id):
     data = sheet.get_all_records()
     for i, r in enumerate(data, start=2):
-        if r["id"] == res_id:
+        if str(r["id"]) == str(res_id):
             sheet.delete_rows(i)
             break
 
@@ -57,8 +58,8 @@ def salle_disponible(salle, date, heure, duree):
     end = start + timedelta(hours=duree)
     for r in load_reservations():
         r_start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
-        r_end = r_start + timedelta(hours=r['duree'])
-        if r["salle"] == salle and not (end <= r_start or start >= r_end):
+        r_end = r_start + timedelta(hours=int(r['duree']))
+        if str(r["salle"]) == salle and not (end <= r_start or start >= r_end):
             return False
     return True
 
@@ -66,17 +67,24 @@ def salle_disponible(salle, date, heure, duree):
 def format_reservations_embed(reservations, titre):
     if not reservations:
         return None
+
     grouped = {}
     for r in reservations:
-        salle = r['salle']
-        grouped.setdefault(salle, []).append(r)
+        salle = str(r['salle'])
+        if salle not in grouped:
+            grouped[salle] = []
+        grouped[salle].append(r)
+
     for salle in grouped:
-        grouped[salle].sort(key=lambda r: datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        grouped[salle].sort(
+            key=lambda r: datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        )
+
     embed = discord.Embed(title=titre, color=discord.Color.blurple())
     for salle in sorted(grouped.keys()):
         value = ""
         for r in grouped[salle]:
-            value += f"ID {r['id']} | {r['date']} {r['heure']} ({r['duree']}h) - <@{r['user']}>\n"
+            value += f"ID {r['id']} | {r['date']} {r['heure']} ({r['duree']}h) - {r['username']} (<@{r['user']}>)\n"
         embed.add_field(name=f"🎶 Salle {salle}", value=value, inline=False)
     return embed
 
@@ -90,7 +98,7 @@ async def on_ready():
 @bot.command()
 async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
     if salle not in codes:
-        return await ctx.send(f"❌ Salle invalide ({', '.join(codes.keys())}).")
+        return await ctx.send("❌ Salle invalide (Sevenans ou Belfort).")
 
     start = datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M")
     if start > datetime.now() + timedelta(days=7):
@@ -100,16 +108,24 @@ async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
         return await ctx.send("❌ Cette salle est déjà réservée à ce créneau.")
 
     res_id = get_new_id()
-    add_reservation(res_id, ctx.author.id, salle, date, heure, duree)
+    add_reservation(res_id, ctx.author.id, ctx.author.name, salle, date, heure, duree)
     await ctx.send(f"✅ Réservation #{res_id} confirmée pour salle {salle} le {date} à {heure} pendant {duree}h.")
 
 @bot.command()
 async def planning(ctx):
     data = load_reservations()
     now = datetime.now()
-    future_reservations = [r for r in data if datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M") >= now]
+    # On affiche seulement si la fin est après "now"
+    future_reservations = []
+    for r in data:
+        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        end = start + timedelta(hours=int(r['duree']))
+        if end >= now:
+            future_reservations.append(r)
+
     if not future_reservations:
         return await ctx.send("📅 Aucun créneau à venir.")
+
     embed = format_reservations_embed(future_reservations, "📅 Réservations à venir")
     await ctx.send(embed=embed)
 
@@ -117,19 +133,26 @@ async def planning(ctx):
 async def historique(ctx):
     data = load_reservations()
     now = datetime.now()
-    past_reservations = [r for r in data if now > datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")]
+    past_reservations = []
+    for r in data:
+        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        end = start + timedelta(hours=int(r['duree']))
+        if now > end and now <= end + timedelta(days=7):
+            past_reservations.append(r)
+
     if not past_reservations:
-        return await ctx.send("📜 Aucun historique.")
-    embed = format_reservations_embed(past_reservations, "📜 Historique des réservations passées")
+        return await ctx.send("📜 Aucun historique récent.")
+
+    embed = format_reservations_embed(past_reservations, "📜 Historique des 7 derniers jours")
     await ctx.send(embed=embed)
 
 @bot.command()
 async def annuler(ctx, res_id: int):
     data = load_reservations()
-    res = next((r for r in data if r["id"] == res_id), None)
+    res = next((r for r in data if str(r["id"]) == str(res_id)), None)
     if not res:
         return await ctx.send("❌ Réservation introuvable.")
-    if int(res["user"]) != ctx.author.id:
+    if str(res["user"]) != str(ctx.author.id):
         return await ctx.send("❌ Vous ne pouvez annuler que vos propres réservations.")
     delete_reservation(res_id)
     await ctx.send(f"✅ Réservation #{res_id} annulée.")
@@ -138,7 +161,7 @@ async def annuler(ctx, res_id: int):
 @commands.has_permissions(administrator=True)
 async def adminannuler(ctx, res_id: int):
     data = load_reservations()
-    res = next((r for r in data if r["id"] == res_id), None)
+    res = next((r for r in data if str(r["id"]) == str(res_id)), None)
     if not res:
         return await ctx.send("❌ Réservation introuvable.")
     delete_reservation(res_id)
@@ -157,21 +180,25 @@ async def setcode(ctx, salle: str, code: str):
 async def check_reservations():
     now = datetime.now()
     data = load_reservations()
-    # Envoi du code 15 min avant
+
+    # Envoi du code 15 min avant le créneau
     for r in data:
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
-        # Si le créneau est dans les 15 prochaines minutes et qu’on n’a pas encore envoyé le code
-        if 0 <= (start - now).total_seconds() <= 15 * 60:
-            user = await bot.fetch_user(int(r["user"]))  # fetch depuis Discord
+        if now + timedelta(minutes=15) >= start and now < start:
+            user = bot.get_user(int(r["user"]))
             if user:
-                await user.send(
-                    f"Salut 👋 ! Voici ton code pour la salle {r['salle']} : {codes[r['salle']]} "
-                    f"(créneau {r['date']} {r['heure']})"
-                )
+                try:
+                    await user.send(
+                        f"Salut 👋 ! Voici ton code pour la salle {r['salle']} : {codes[r['salle']]} "
+                        f"(créneau {r['date']} {r['heure']})"
+                    )
+                except:
+                    print(f"Impossible d'envoyer un DM à {user}.")
+
     # Suppression des réservations passées depuis plus de 7 jours
     for r in data:
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
-        end = start + timedelta(hours=r['duree'])
+        end = start + timedelta(hours=int(r['duree']))
         if now > end + timedelta(days=7):
             delete_reservation(r['id'])
             print(f"🗑 Réservation #{r['id']} supprimée (trop ancienne).")
