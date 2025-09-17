@@ -32,7 +32,7 @@ client = gspread.authorize(creds)
 sheet = client.open("Reservations").sheet1  # nom du sheet
 
 # === STOCKAGE DES CODES ===
-codes = {"Sevenans": "1709", "Belfort": "1705"}
+codes = {"1": "1709", "2": "1705"}
 
 # === FONCTIONS GOOGLE SHEETS ===
 def load_reservations():
