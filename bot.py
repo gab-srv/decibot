@@ -3,9 +3,10 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import os
 
 # === CONFIG BOT ===
-TOKEN = "MTQxNzc2MDMwNzU5MzYxMzM5Mw.GxGKaM.7rkt3QBboANjw0KL5TEkshyQo5roQyHBblDCHs"
+TOKEN = os.environ.get("TOKEN")
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
@@ -13,7 +14,7 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
 client = gspread.authorize(creds)
-sheet = client.open("ReservationsMusique").sheet1  # nom du sheet
+sheet = client.open("Reservations").sheet1  # nom du sheet
 
 # === STOCKAGE DES CODES ===
 codes = {"1": "0000", "2": "0000"}
