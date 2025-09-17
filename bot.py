@@ -129,7 +129,7 @@ async def annuler(ctx, res_id: int):
     res = next((r for r in data if r["id"] == res_id), None)
     if not res:
         return await ctx.send("❌ Réservation introuvable.")
-    if str(res["user"]) != str(ctx.author.id):
+    if int(res["user"]) != ctx.author.id:
         return await ctx.send("❌ Vous ne pouvez annuler que vos propres réservations.")
     delete_reservation(res_id)
     await ctx.send(f"✅ Réservation #{res_id} annulée.")
@@ -160,8 +160,9 @@ async def check_reservations():
     # Envoi du code 15 min avant
     for r in data:
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
-        if timedelta(minutes=0) <= (start - now) <= timedelta(minutes=15):
-            user = bot.get_user(int(r["user"]))
+        # Si le créneau est dans les 15 prochaines minutes et qu’on n’a pas encore envoyé le code
+        if 0 <= (start - now).total_seconds() <= 15 * 60:
+            user = await bot.fetch_user(int(r["user"]))  # fetch depuis Discord
             if user:
                 await user.send(
                     f"Salut 👋 ! Voici ton code pour la salle {r['salle']} : {codes[r['salle']]} "
