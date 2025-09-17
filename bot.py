@@ -14,7 +14,7 @@ from discord.utils import get
 # CONFIGURATION
 # =======================
 TOKEN = os.environ.get("TOKEN")  # Token Discord via variable d'environnement Render
-GUILD_ID = 1234567890  # Remplace par ton serveur Discord
+GUILD_ID = 708681984766902403  # Remplace par ton serveur Discord
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 SHEET_NAME = "Reservations"
 CLEANUP_DAYS = 7
