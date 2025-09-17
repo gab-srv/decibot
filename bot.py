@@ -1,37 +1,17 @@
-import os
 import discord
-from discord import app_commands
-from discord.ext import tasks
+from discord.ext import commands, tasks
+from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime, timedelta
-import threading
+import os, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import asyncio
-from discord.utils import get
 
-# =======================
-# CONFIGURATION
-# =======================
-TOKEN = os.environ.get("TOKEN")  # Token Discord via variable d'environnement Render
-GUILD_ID = 708681984766902403  # Remplace par ton serveur Discord
-SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-SHEET_NAME = "Reservations"
-CLEANUP_DAYS = 7
+# === CONFIG BOT ===
+TOKEN = os.environ.get("TOKEN")
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="/", intents=intents)
 
-# Codes d'accès par nom de salle
-codes = {"Sevenans": "1709", "Belfort": "1705"}
-
-# =======================
-# GOOGLE SHEET
-# =======================
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", SCOPE)
-client = gspread.authorize(creds)
-sheet = client.open(SHEET_NAME).sheet1
-
-# =======================
-# SERVEUR HTTP BIDON (pour Render Web Service)
-# =======================
+# === FAUX PORT ===
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -45,144 +25,155 @@ def run_server():
 
 threading.Thread(target=run_server, daemon=True).start()
 
-# =======================
-# BOT DISCORD
-# =======================
-intents = discord.Intents.default()
-intents.members = True  # Nécessaire pour envoyer des DMs
-bot = discord.Client(intents=intents)
-tree = app_commands.CommandTree(bot)
+# === CONFIG GOOGLE SHEETS ===
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(creds)
+sheet = client.open("Reservations").sheet1  # nom du sheet
 
-# =======================
-# FONCTIONS UTILITAIRES
-# =======================
-def ajouter_reservation(user, salle, date_str, heure_str, duree):
-    res_id = str(int(datetime.now().timestamp()))
-    row = [res_id, user, salle, date_str, heure_str, str(duree)]
-    sheet.append_row(row)
+# === STOCKAGE DES CODES ===
+codes = {"Sevenans": "1709", "Belfort": "1705"}
 
-def supprimer_reservation_by_id(res_id):
-    all_records = sheet.get_all_records()
-    for idx, r in enumerate(all_records, start=2):
-        if str(r["id"]) == str(res_id):
-            sheet.delete_row(idx)
-            return True
-    return False
+# === FONCTIONS GOOGLE SHEETS ===
+def load_reservations():
+    return sheet.get_all_records()
 
-def nettoyer_anciennes_reservations():
-    all_records = sheet.get_all_records()
-    now = datetime.now()
-    for idx, r in enumerate(all_records, start=2):
-        res_date = datetime.strptime(r["date"], "%Y-%m-%d")
-        if res_date < now - timedelta(days=CLEANUP_DAYS):
-            sheet.delete_row(idx)
+def add_reservation(res_id, user_id, salle, date, heure, duree):
+    sheet.append_row([res_id, user_id, salle, date, heure, duree])
 
-# =======================
-# TÂCHES ASYNCHRONE
-# =======================
-@tasks.loop(hours=24)
-async def cleanup_task():
-    nettoyer_anciennes_reservations()
+def delete_reservation(res_id):
+    data = sheet.get_all_records()
+    for i, r in enumerate(data, start=2):
+        if r["id"] == res_id:
+            sheet.delete_rows(i)
+            break
 
-async def send_codes_task():
-    await bot.wait_until_ready()
-    sent_ids = set()  # Pour éviter d'envoyer plusieurs fois
-    while not bot.is_closed():
-        all_records = sheet.get_all_records()
-        now = datetime.now()
-        for r in all_records:
-            res_datetime = datetime.strptime(r["date"] + " " + r["heure"], "%Y-%m-%d %H:%M")
-            if timedelta(minutes=29) <= res_datetime - now <= timedelta(minutes=31):
-                if r["id"] in sent_ids:
-                    continue
-                user = get(bot.get_all_members(), name=r["user"])
-                if user:
-                    code_salle = codes.get(r["salle"], "Code inconnu")
-                    try:
-                        await user.send(f"Votre créneau pour la salle {r['salle']} commence dans 30 minutes !\nCode d'accès : {code_salle}")
-                        sent_ids.add(r["id"])
-                    except Exception as e:
-                        print(f"Impossible d'envoyer un DM à {r['user']} : {e}")
-        await asyncio.sleep(60)
+def get_new_id():
+    data = sheet.get_all_records()
+    return len(data) + 1
 
-# =======================
-# COMMANDES SLASH
-# =======================
-@tree.command(name="reserver", description="Réserver une salle", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    salle="Nom de la salle",
-    date="Date YYYY-MM-DD",
-    heure="Heure HH:MM",
-    duree="Durée en heures"
-)
-async def reserver(interaction: discord.Interaction, salle: str, date: str, heure: str, duree: int):
-    salle = salle.strip()
-    if salle not in codes:
-        await interaction.response.send_message(
-            f"Salle inconnue. Salles disponibles : {', '.join(codes.keys())}",
-            ephemeral=True
-        )
-        return
+def salle_disponible(salle, date, heure, duree):
+    start = datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M")
+    end = start + timedelta(hours=duree)
+    for r in load_reservations():
+        r_start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        r_end = r_start + timedelta(hours=r['duree'])
+        if r["salle"] == salle and not (end <= r_start or start >= r_end):
+            return False
+    return True
 
-    date_obj = datetime.strptime(date, "%Y-%m-%d")
-    if date_obj > datetime.now() + timedelta(days=7):
-        await interaction.response.send_message(
-            "Tu ne peux pas réserver plus d'une semaine à l'avance.", ephemeral=True
-        )
-        return
+# === UTILITAIRE POUR EMBED ===
+def format_reservations_embed(reservations, titre):
+    if not reservations:
+        return None
+    grouped = {}
+    for r in reservations:
+        salle = r['salle']
+        grouped.setdefault(salle, []).append(r)
+    for salle in grouped:
+        grouped[salle].sort(key=lambda r: datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+    embed = discord.Embed(title=titre, color=discord.Color.blurple())
+    for salle in sorted(grouped.keys()):
+        value = ""
+        for r in grouped[salle]:
+            value += f"ID {r['id']} | {r['date']} {r['heure']} ({r['duree']}h) - <@{r['user']}>\n"
+        embed.add_field(name=f"🎶 Salle {salle}", value=value, inline=False)
+    return embed
 
-    ajouter_reservation(interaction.user.name, salle, date, heure, duree)
-    await interaction.response.send_message(
-        f"Salle {salle} réservée pour {date} à {heure} pendant {duree}h.\nVous recevrez le code d'accès 30 minutes avant le créneau.",
-        ephemeral=True
-    )
-
-@tree.command(name="planning", description="Voir les réservations à venir", guild=discord.Object(id=GUILD_ID))
-async def planning(interaction: discord.Interaction):
-    all_records = sheet.get_all_records()
-    now = datetime.now()
-    future_records = [r for r in all_records if datetime.strptime(r["date"], "%Y-%m-%d") >= now]
-    future_records.sort(key=lambda x: (x["salle"], x["date"], x["heure"]))
-
-    msg = "**Planning des réservations :**\n"
-    for r in future_records:
-        msg += f"Salle {r['salle']} : {r['date']} à {r['heure']} ({r['user']})\n"
-
-    await interaction.response.send_message(msg or "Aucune réservation à venir.", ephemeral=False)
-
-@tree.command(name="annuler", description="Annuler ta réservation", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(res_id="ID de la réservation")
-async def annuler(interaction: discord.Interaction, res_id: str):
-    all_records = sheet.get_all_records()
-    for r in all_records:
-        if str(r["id"]) == str(res_id) and r["user"] == interaction.user.name:
-            supprimer_reservation_by_id(res_id)
-            await interaction.response.send_message("Réservation annulée.", ephemeral=True)
-            return
-    await interaction.response.send_message("Réservation introuvable ou vous n'êtes pas autorisé.", ephemeral=True)
-
-@tree.command(name="adminannuler", description="Annuler une réservation (admin)", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(res_id="ID de la réservation")
-async def adminannuler(interaction: discord.Interaction, res_id: str):
-    if interaction.user.guild_permissions.administrator:
-        if supprimer_reservation_by_id(res_id):
-            await interaction.response.send_message("Réservation annulée par admin.", ephemeral=True)
-        else:
-            await interaction.response.send_message("Réservation introuvable.", ephemeral=True)
-    else:
-        await interaction.response.send_message("Vous n'êtes pas admin.", ephemeral=True)
-
-# =======================
-# EVENTS
-# =======================
+# === EVENTS ===
 @bot.event
 async def on_ready():
-    await tree.sync(guild=discord.Object(id=GUILD_ID))
-    cleanup_task.start()
-    bot.loop.create_task(send_codes_task())
-    print(f"Connecté en tant que {bot.user}!")
+    print(f"Connecté en tant que {bot.user}")
+    check_reservations.start()
 
-# =======================
-# LANCEMENT DU BOT
-# =======================
+# === COMMANDES ===
+@bot.command()
+async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
+    if salle not in codes:
+        return await ctx.send(f"❌ Salle invalide ({', '.join(codes.keys())}).")
+
+    start = datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M")
+    if start > datetime.now() + timedelta(days=7):
+        return await ctx.send("❌ Impossible de réserver à plus d'une semaine d'avance.")
+
+    if not salle_disponible(salle, date, heure, duree):
+        return await ctx.send("❌ Cette salle est déjà réservée à ce créneau.")
+
+    res_id = get_new_id()
+    add_reservation(res_id, ctx.author.id, salle, date, heure, duree)
+    await ctx.send(f"✅ Réservation #{res_id} confirmée pour salle {salle} le {date} à {heure} pendant {duree}h.")
+
+@bot.command()
+async def planning(ctx):
+    data = load_reservations()
+    now = datetime.now()
+    future_reservations = [r for r in data if datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M") >= now]
+    if not future_reservations:
+        return await ctx.send("📅 Aucun créneau à venir.")
+    embed = format_reservations_embed(future_reservations, "📅 Réservations à venir")
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def historique(ctx):
+    data = load_reservations()
+    now = datetime.now()
+    past_reservations = [r for r in data if now > datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")]
+    if not past_reservations:
+        return await ctx.send("📜 Aucun historique.")
+    embed = format_reservations_embed(past_reservations, "📜 Historique des réservations passées")
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def annuler(ctx, res_id: int):
+    data = load_reservations()
+    res = next((r for r in data if r["id"] == res_id), None)
+    if not res:
+        return await ctx.send("❌ Réservation introuvable.")
+    if str(res["user"]) != str(ctx.author.id):
+        return await ctx.send("❌ Vous ne pouvez annuler que vos propres réservations.")
+    delete_reservation(res_id)
+    await ctx.send(f"✅ Réservation #{res_id} annulée.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def adminannuler(ctx, res_id: int):
+    data = load_reservations()
+    res = next((r for r in data if r["id"] == res_id), None)
+    if not res:
+        return await ctx.send("❌ Réservation introuvable.")
+    delete_reservation(res_id)
+    await ctx.send(f"🛑 Réservation #{res_id} annulée par un admin.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setcode(ctx, salle: str, code: str):
+    if salle not in codes:
+        return await ctx.send("❌ Salle invalide")
+    codes[salle] = code
+    await ctx.send(f"🔑 Code de la salle {salle} mis à jour.")
+
+# === TÂCHE RÉCURRENTE ===
+@tasks.loop(minutes=1)
+async def check_reservations():
+    now = datetime.now()
+    data = load_reservations()
+    # Envoi du code 15 min avant
+    for r in data:
+        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        if timedelta(minutes=0) <= (start - now) <= timedelta(minutes=15):
+            user = bot.get_user(int(r["user"]))
+            if user:
+                await user.send(
+                    f"Salut 👋 ! Voici ton code pour la salle {r['salle']} : {codes[r['salle']]} "
+                    f"(créneau {r['date']} {r['heure']})"
+                )
+    # Suppression des réservations passées depuis plus de 7 jours
+    for r in data:
+        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        end = start + timedelta(hours=r['duree'])
+        if now > end + timedelta(days=7):
+            delete_reservation(r['id'])
+            print(f"🗑 Réservation #{r['id']} supprimée (trop ancienne).")
+
 bot.run(TOKEN)
+
