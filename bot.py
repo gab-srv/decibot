@@ -3,12 +3,27 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import os
+import os, threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # === CONFIG BOT ===
 TOKEN = os.environ.get("TOKEN")
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
+
+# === FAUX PORT ===
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot Discord en ligne")
+
+def run_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("", port), Handler)
+    server.serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
 
 # === CONFIG GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -17,7 +32,7 @@ client = gspread.authorize(creds)
 sheet = client.open("Reservations").sheet1  # nom du sheet
 
 # === STOCKAGE DES CODES ===
-codes = {"Sevenans": "0000", "Belfort": "1705"}
+codes = {"Sevenans": "1709", "Belfort": "1705"}
 
 # === FONCTIONS GOOGLE SHEETS ===
 def load_reservations():
