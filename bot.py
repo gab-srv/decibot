@@ -175,6 +175,12 @@ async def setcode(ctx, salle: str, code: str):
     codes[salle] = code
     await ctx.send(f"🔑 Code de la salle {salle} mis à jour.")
 
+@bot.command()
+async def download(message):
+    channel = message.channel
+    await channel.send("{0.author.mention}, regarde dans tes messages privés ! Je t'ai envoyé le lien de téléchargement du Pack de texture.".format(message))
+    await message.author.send("https://www.dropbox.com/s/230l35psox25jn9/LavaFights V2.10 Manuel.zip?dl=1.\n\nIl est très important de télécharger et d'installer Optifine ! =>\nhttps://optifine.net/adloadx?f=OptiFine_1.12.2_HD_U_F5.jar&amp;x=1da4".format(message))
+
 # === TÂCHE RÉCURRENTE ===
 @tasks.loop(minutes=1)
 async def check_reservations():
