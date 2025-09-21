@@ -185,7 +185,7 @@ async def check_reservations():
     for r in data:
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
         if now + timedelta(minutes=15) >= start and now < start:
-            user = bot.get_user(int(r["user"]))
+            user = bot.get_user(str(r["user"]))
             if user:
                 try:
                     await user.send(
