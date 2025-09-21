@@ -188,19 +188,23 @@ async def check_reservations():
     now = datetime.now()
     data = load_reservations()
 
-    # Envoi du code 15 min avant le créneau
     for r in data:
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        
+        # Si on est entre maintenant et 15 min avant
         if now + timedelta(minutes=15) >= start and now < start:
-            user = bot.get_user(str(r["user"]))
-            if user:
-                try:
-                    await user.send(
-                        f"Salut 👋 ! Voici ton code pour la salle {r['salle']} : {codes[r['salle']]} "
-                        f"(créneau {r['date']} {r['heure']})"
-                    )
-                except:
-                    print(f"Impossible d'envoyer un DM à {user}.")
+            try:
+                user = bot.get_user(int(r["user"]))
+                if user is None:
+                    user = await bot.fetch_user(int(r["user"]))
+                
+                await user.send(
+                    f"Salut 👋 ! Voici ton code pour la salle {r['salle']} : {codes[r['salle']]} "
+                    f"(créneau {r['date']} {r['heure']})"
+                )
+                print(f"Code envoyé à {r['username']} ({r['user']})")
+            except Exception as e:
+                print(f"⚠️ Erreur pour {r['user']} : {e}")
 
     # Suppression des réservations passées depuis plus de 7 jours
     for r in data:
