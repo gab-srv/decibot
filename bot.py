@@ -11,7 +11,7 @@ TOKEN = os.environ.get("TOKEN")
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# === FAUX PORT ===
+# === FAUX PORT (pour render)===
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
