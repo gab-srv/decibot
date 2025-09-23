@@ -124,6 +124,14 @@ async def historique(ctx):
     data = load_reservations()
     now = datetime.now()
     past_reservations = []
+    # Suppression des réservations passées depuis plus de 7 jours
+    for r in data:
+        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        end = start + timedelta(hours=int(r['duree']))
+        if now > end + timedelta(days=7):
+            delete_reservation(r['id'])
+            print(f"🗑 Réservation #{r['id']} supprimée (trop ancienne).")
+    
     for r in data:
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
         end = start + timedelta(hours=int(r['duree']))
@@ -202,16 +210,6 @@ async def download(message):
     await channel.send("{0.author.mention}, regarde dans tes messages privés ! Je t'ai envoyé le lien de téléchargement du Pack de texture.".format(message))
     await user.send("https://www.dropbox.com/s/230l35psox25jn9/LavaFights V2.10 Manuel.zip?dl=1.\n\nIl est très important de télécharger et d'installer Optifine ! =>\nhttps://optifine.net/adloadx?f=OptiFine_1.12.2_HD_U_F5.jar&amp;x=1da4".format(message))
 
-# === TÂCHE RÉCURRENTE ===
-@tasks.loop(minutes=1)
-async def check_reservations():
-    # Suppression des réservations passées depuis plus de 7 jours
-    for r in data:
-        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
-        end = start + timedelta(hours=int(r['duree']))
-        if now > end + timedelta(days=7):
-            delete_reservation(r['id'])
-            print(f"🗑 Réservation #{r['id']} supprimée (trop ancienne).")
 
 keep_alive()
 bot.run(TOKEN)
