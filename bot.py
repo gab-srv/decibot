@@ -4,26 +4,12 @@ from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os, threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from keep_alive import keep_alive
 
 # === CONFIG BOT ===
 TOKEN = os.environ.get("TOKEN")
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
-
-# === FAUX PORT (pour render)===
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot Discord en ligne")
-
-def run_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("", port), Handler)
-    server.serve_forever()
-
-threading.Thread(target=run_server, daemon=True).start()
 
 # === CONFIG GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -176,6 +162,31 @@ async def setcode(ctx, salle: str, code: str):
     await ctx.send(f"🔑 Code de la salle {salle} mis à jour.")
 
 @bot.command()
+async def code(ctx):
+    """Envoie le code de ta réservation si elle commence dans moins d'une heure."""
+    now = datetime.now()
+    data = load_reservations()
+
+    # On cherche une réservation de l'utilisateur qui commence dans < 1h
+    for r in data:
+        if str(r["user"]) != str(ctx.author.id):
+            continue
+
+        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        if now <= start <= now + timedelta(hours=1):
+            # On a trouvé une réservation éligible
+            try:
+                await ctx.author.send(
+                    f"🔑 Voici ton code pour la salle **{r['salle']}** : `{codes[r['salle']]}`\n"
+                    f"📅 Créneau : {r['date']} {r['heure']} ({r['duree']}h)"
+                )
+                return await ctx.send("✅ Le code t’a été envoyé en message privé !")
+            except:
+                return await ctx.send("❌ Impossible de t’envoyer un DM, vérifie tes paramètres Discord.")
+
+    await ctx.send("❌ Tu n’as aucune réservation dans l’heure qui vient.")
+
+@bot.command()
 async def download(message):
     channel = message.channel
     user = await bot.fetch_user(int(message.author.id))
@@ -214,5 +225,6 @@ async def check_reservations():
             delete_reservation(r['id'])
             print(f"🗑 Réservation #{r['id']} supprimée (trop ancienne).")
 
+keep_alive()
 bot.run(TOKEN)
 
