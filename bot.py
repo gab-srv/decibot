@@ -5,11 +5,12 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os, threading
 from keep_alive import keep_alive
+import json
 
 # === CONFIG BOT ===
 TOKEN = os.environ.get("TOKEN")
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="/", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # === CONFIG GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -18,7 +19,10 @@ client = gspread.authorize(creds)
 sheet = client.open("Reservations").sheet1  # nom du sheet
 
 # === STOCKAGE DES CODES ===
-codes = {"Sevenans": "1709", "Belfort": "1705"}
+with open("config.json", "r") as f:
+    config = json.load(f)
+
+codes = config["salles"]
 
 # === FONCTIONS GOOGLE SHEETS ===
 def load_reservations():
@@ -153,12 +157,17 @@ async def adminannuler(ctx, res_id: int):
     delete_reservation(res_id)
     await ctx.send(f"🛑 Réservation #{res_id} annulée par un admin.")
 
+def save_codes():
+    with open("config.json", "w") as f:
+        json.dump({"salles": codes}, f, indent=4)
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setcode(ctx, salle: str, code: str):
     if salle not in codes:
         return await ctx.send("❌ Salle invalide")
     codes[salle] = code
+    save_codes()
     await ctx.send(f"🔑 Code de la salle {salle} mis à jour.")
 
 @bot.command()
@@ -196,27 +205,6 @@ async def download(message):
 # === TÂCHE RÉCURRENTE ===
 @tasks.loop(minutes=1)
 async def check_reservations():
-    now = datetime.now()
-    data = load_reservations()
-
-    for r in data:
-        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
-        
-        # Si on est entre maintenant et 15 min avant
-        if now + timedelta(minutes=15) >= start and now < start:
-            try:
-                user = bot.get_user(int(r["user"]))
-                if user is None:
-                    user = await bot.fetch_user(int(r["user"]))
-                
-                await user.send(
-                    f"Salut 👋 ! Voici ton code pour la salle {r['salle']} : {codes[r['salle']]} "
-                    f"(créneau {r['date']} {r['heure']})"
-                )
-                print(f"Code envoyé à {r['username']} ({r['user']})")
-            except Exception as e:
-                print(f"⚠️ Erreur pour {r['user']} : {e}")
-
     # Suppression des réservations passées depuis plus de 7 jours
     for r in data:
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
