@@ -2,4 +2,3 @@ discord.py
 gspread
 oauth2client
 flask
-json
