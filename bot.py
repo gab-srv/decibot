@@ -82,7 +82,6 @@ def format_reservations_embed(reservations, titre):
 @bot.event
 async def on_ready():
     print(f"Connecté en tant que {bot.user}")
-    check_reservations.start()
 
 # === COMMANDES ===
 @bot.command()
@@ -131,7 +130,7 @@ async def historique(ctx):
         if now > end + timedelta(days=7):
             delete_reservation(r['id'])
             print(f"🗑 Réservation #{r['id']} supprimée (trop ancienne).")
-    
+
     for r in data:
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
         end = start + timedelta(hours=int(r['duree']))
