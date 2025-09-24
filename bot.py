@@ -179,18 +179,19 @@ async def setcode(ctx, salle: str, code: str):
 
 @bot.command()
 async def code(ctx):
-    """Envoie le code de ta réservation si elle commence dans moins d'une heure."""
+    """Envoie le code de ta réservation si elle commence dans moins d'une heure ou si elle est déjà en cours."""
     now = datetime.now()
     data = load_reservations()
 
-    # On cherche une réservation de l'utilisateur qui commence dans < 1h
     for r in data:
         if str(r["user"]) != str(ctx.author.id):
             continue
 
         start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
-        if now <= start <= now + timedelta(hours=1):
-            # On a trouvé une réservation éligible
+        end = start + timedelta(hours=int(r['duree']))
+
+        # Autoriser si la réservation commence dans < 1h OU si elle a commencé il y a < 1h OU si elle est en cours
+        if (now <= start <= now + timedelta(hours=1)) or (start <= now <= end):
             try:
                 await ctx.author.send(
                     f"🔑 Voici ton code pour la salle **{r['salle']}** : `{codes[r['salle']]}`\n"
@@ -200,14 +201,7 @@ async def code(ctx):
             except:
                 return await ctx.send("❌ Impossible de t’envoyer un DM, vérifie tes paramètres Discord.")
 
-    await ctx.send("❌ Tu n’as aucune réservation dans l’heure qui vient.")
-
-@bot.command()
-async def download(message):
-    channel = message.channel
-    user = await bot.fetch_user(int(message.author.id))
-    await channel.send("{0.author.mention}, regarde dans tes messages privés ! Je t'ai envoyé le lien de téléchargement du Pack de texture.".format(message))
-    await user.send("https://www.dropbox.com/s/230l35psox25jn9/LavaFights V2.10 Manuel.zip?dl=1.\n\nIl est très important de télécharger et d'installer Optifine ! =>\nhttps://optifine.net/adloadx?f=OptiFine_1.12.2_HD_U_F5.jar&amp;x=1da4".format(message))
+    await ctx.send("❌ Tu n’as aucune réservation à venir dans l’heure ou en cours.")
 
 
 keep_alive()
