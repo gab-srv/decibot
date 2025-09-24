@@ -31,7 +31,19 @@ def load_reservations():
     return sheet.get_all_records()
 
 def add_reservation(res_id, user_id, username, salle, date, heure, duree):
-    # Forcer l'ID en string pour éviter les problèmes
+    """
+    Ajoute une réservation dans la feuille. S'assure que l'ID n'existe pas déjà.
+    """
+    # sécuriser les types
+    res_id = int(res_id)
+    # recharger les ids actuels
+    data = load_reservations()
+    existing = {str(r.get("id")) for r in data}
+
+    # si l'id est pris (peu probable si get_new_id() est utilisé), on incrémente jusqu'à trouver un libre
+    while str(res_id) in existing:
+        res_id += 1
+
     sheet.append_row([str(res_id), str(user_id), username, salle, date, heure, str(duree)])
 
 def delete_reservation(res_id):
@@ -42,14 +54,31 @@ def delete_reservation(res_id):
             break
 
 def get_new_id():
-    data = sheet.get_all_records()
-    return len(data) + 1
+    """
+    Renvoie un ID entier unique : max(id existants) + 1.
+    - Ignore les ids non-entiers.
+    """
+    data = load_reservations()
+    max_id = 0
+    for r in data:
+        try:
+            rid = int(r.get("id", 0))
+            if rid > max_id:
+                max_id = rid
+        except Exception:
+            continue
+    return max_id + 1
 
 def salle_disponible(salle, date, heure, duree):
+    # start et end aware
     start = tz.localize(datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M"))
     end = start + timedelta(hours=duree)
     for r in load_reservations():
-        r_start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        try:
+            r_start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        except Exception:
+            # si format invalide dans la feuille, on skip (ou on peut log)
+            continue
         r_end = r_start + timedelta(hours=int(r['duree']))
         if str(r["salle"]) == salle and not (end <= r_start or start >= r_end):
             return False
@@ -91,9 +120,25 @@ async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
     if salle not in codes:
         return await ctx.send("❌ Salle invalide (Sevenans ou Belfort).")
 
-    start = tz.localize(datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M"))
-    if start > datetime.now(tz) + timedelta(days=7):
+    # validation de la date/heure (format attendu)
+    try:
+        start = tz.localize(datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M"))
+    except ValueError:
+        return await ctx.send("❌ Format date/heure invalide. Utilise : YYYY-MM-DD HH:MM")
+
+    now = datetime.now(tz)
+
+    # Interdire réservation dans le passé
+    if start < now:
+        return await ctx.send("❌ Impossible de réserver pour une date/heure déjà passée.")
+
+    # Interdire réservation à plus d'une semaine
+    if start > now + timedelta(days=7):
         return await ctx.send("❌ Impossible de réserver à plus d'une semaine d'avance.")
+
+    # Vérifier durée positive
+    if duree <= 0:
+        return await ctx.send("❌ Durée invalide (doit être > 0).")
 
     if not salle_disponible(salle, date, heure, duree):
         return await ctx.send("❌ Cette salle est déjà réservée à ce créneau.")
@@ -105,11 +150,14 @@ async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
 @bot.command()
 async def planning(ctx):
     data = load_reservations()
-    now = datetime.now(tz)  # ✅ timezone
+    now = datetime.now(tz)
 
     future_reservations = []
     for r in data:
-        start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        try:
+            start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        except Exception:
+            continue
         end = start + timedelta(hours=int(r['duree']))
         if end >= now:
             future_reservations.append(r)
@@ -127,14 +175,20 @@ async def historique(ctx):
     past_reservations = []
     # Suppression des réservations passées depuis plus de 7 jours
     for r in data:
-        start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        try:
+            start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        except Exception:
+            continue
         end = start + timedelta(hours=int(r['duree']))
         if now > end + timedelta(days=7):
             delete_reservation(r['id'])
             print(f"🗑 Réservation #{r['id']} supprimée (trop ancienne).")
 
     for r in data:
-        start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        try:
+            start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        except Exception:
+            continue
         end = start + timedelta(hours=int(r['duree']))
         if now > end and now <= end + timedelta(days=7):
             past_reservations.append(r)
@@ -189,7 +243,10 @@ async def code(ctx):
         if str(r["user"]) != str(ctx.author.id):
             continue
 
-        start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        try:
+            start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
+        except Exception:
+            continue
         end = start + timedelta(hours=int(r['duree']))
 
         if (now <= start <= now + timedelta(hours=1)) or (start <= now <= end):
@@ -204,7 +261,5 @@ async def code(ctx):
 
     await ctx.send("❌ Tu n’as aucune réservation à venir dans l’heure ou en cours.")
 
-
 keep_alive()
 bot.run(TOKEN)
-
