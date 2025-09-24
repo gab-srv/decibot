@@ -46,10 +46,10 @@ def get_new_id():
     return len(data) + 1
 
 def salle_disponible(salle, date, heure, duree):
-    start = datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M")
+    start = tz.localize(datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M"))
     end = start + timedelta(hours=duree)
     for r in load_reservations():
-        r_start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        r_start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
         r_end = r_start + timedelta(hours=int(r['duree']))
         if str(r["salle"]) == salle and not (end <= r_start or start >= r_end):
             return False
@@ -69,7 +69,7 @@ def format_reservations_embed(reservations, titre):
 
     for salle in grouped:
         grouped[salle].sort(
-            key=lambda r: datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+            key=lambda r: tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
         )
 
     embed = discord.Embed(title=titre, color=discord.Color.blurple())
@@ -91,7 +91,7 @@ async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
     if salle not in codes:
         return await ctx.send("❌ Salle invalide (Sevenans ou Belfort).")
 
-    start = datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M")
+    start = tz.localize(datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M"))
     if start > datetime.now(tz) + timedelta(days=7):
         return await ctx.send("❌ Impossible de réserver à plus d'une semaine d'avance.")
 
@@ -109,7 +109,7 @@ async def planning(ctx):
 
     future_reservations = []
     for r in data:
-        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+        start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
         end = start + timedelta(hours=int(r['duree']))
         if end >= now:
             future_reservations.append(r)
@@ -127,14 +127,14 @@ async def historique(ctx):
     past_reservations = []
     # Suppression des réservations passées depuis plus de 7 jours
     for r in data:
-        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
         end = start + timedelta(hours=int(r['duree']))
         if now > end + timedelta(days=7):
             delete_reservation(r['id'])
             print(f"🗑 Réservation #{r['id']} supprimée (trop ancienne).")
 
     for r in data:
-        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
         end = start + timedelta(hours=int(r['duree']))
         if now > end and now <= end + timedelta(days=7):
             past_reservations.append(r)
@@ -181,7 +181,7 @@ async def setcode(ctx, salle: str, code: str):
 
 @bot.command()
 async def code(ctx):
-    """Envoie le code de ta réservation si elle commence dans moins d'une heure ou si elle est déjà en cours."""
+    """Envoie le code si ta réservation commence dans <1h ou si elle est en cours."""
     now = datetime.now(tz)
     data = load_reservations()
 
@@ -189,10 +189,9 @@ async def code(ctx):
         if str(r["user"]) != str(ctx.author.id):
             continue
 
-        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
         end = start + timedelta(hours=int(r['duree']))
 
-        # Autoriser si la réservation commence dans < 1h OU si elle a commencé il y a < 1h OU si elle est en cours
         if (now <= start <= now + timedelta(hours=1)) or (start <= now <= end):
             try:
                 await ctx.author.send(
