@@ -6,11 +6,13 @@ from oauth2client.service_account import ServiceAccountCredentials
 import os, threading
 from keep_alive import keep_alive
 import json
+import pytz
 
 # === CONFIG BOT ===
 TOKEN = os.environ.get("TOKEN")
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
+tz = pytz.timezone("Europe/Paris")
 
 # === CONFIG GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -90,7 +92,7 @@ async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
         return await ctx.send("❌ Salle invalide (Sevenans ou Belfort).")
 
     start = datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M")
-    if start > datetime.now() + timedelta(days=7):
+    if start > datetime.now(tz) + timedelta(days=7):
         return await ctx.send("❌ Impossible de réserver à plus d'une semaine d'avance.")
 
     if not salle_disponible(salle, date, heure, duree):
@@ -103,11 +105,11 @@ async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
 @bot.command()
 async def planning(ctx):
     data = load_reservations()
-    now = datetime.now()
-    # On affiche seulement si la fin est après "now"
+    now = datetime.now(tz)  # ✅ timezone
+
     future_reservations = []
     for r in data:
-        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M")
+        start = datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M").replace(tzinfo=tz)
         end = start + timedelta(hours=int(r['duree']))
         if end >= now:
             future_reservations.append(r)
@@ -121,7 +123,7 @@ async def planning(ctx):
 @bot.command()
 async def historique(ctx):
     data = load_reservations()
-    now = datetime.now()
+    now = datetime.now(tz)
     past_reservations = []
     # Suppression des réservations passées depuis plus de 7 jours
     for r in data:
@@ -180,7 +182,7 @@ async def setcode(ctx, salle: str, code: str):
 @bot.command()
 async def code(ctx):
     """Envoie le code de ta réservation si elle commence dans moins d'une heure ou si elle est déjà en cours."""
-    now = datetime.now()
+    now = datetime.now(tz)
     data = load_reservations()
 
     for r in data:
