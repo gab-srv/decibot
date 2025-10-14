@@ -4,12 +4,11 @@ from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os, threading
-from keep_alive import keep_alive
 import json
 import pytz
 
 # === CONFIG BOT ===
-TOKEN = os.environ.get("TOKEN")
+TOKEN = "MTQxNzc2MDMwNzU5MzYxMzM5Mw.GxGKaM.7rkt3QBboANjw0KL5TEkshyQo5roQyHBblDCHs"
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 tz = pytz.timezone("Europe/Paris")
@@ -261,5 +260,6 @@ async def code(ctx):
 
     await ctx.send("❌ Tu n’as aucune réservation à venir dans l’heure ou en cours.")
 
-keep_alive()
-bot.run(TOKEN)
+
+if __name__ == "__main__":
+    bot.run(TOKEN)
