@@ -1,0 +1,38 @@
+# Secrets & config
+.env
+.env.*
+credentials.json
+config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+venv/
+.env-venv/
+env/
+env.bak/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+*.pid
+
+# Docker
+*.tar
+docker-compose.override.yml
+
+# Misc
+node_modules/
+dist/
+build/
