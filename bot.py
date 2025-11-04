@@ -1,23 +1,34 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import os, threading
+import os
 import json
 import pytz
+from dotenv import load_dotenv
+
+# === CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ===
+load_dotenv()
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME", "Reservations")
+CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+TZ = os.getenv("TZ", "Europe/Paris")
+
+if not TOKEN:
+    raise ValueError("❌ Le token Discord n'est pas défini dans le fichier .env (DISCORD_TOKEN).")
 
 # === CONFIG BOT ===
-TOKEN = "MTQxNzc2MDMwNzU5MzYxMzM5Mw.GxGKaM.7rkt3QBboANjw0KL5TEkshyQo5roQyHBblDCHs"
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
-tz = pytz.timezone("Europe/Paris")
+tz = pytz.timezone(TZ)
 
 # === CONFIG GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
 client = gspread.authorize(creds)
-sheet = client.open("Reservations").sheet1  # nom du sheet
+sheet = client.open(SHEET_NAME).sheet1
 
 # === STOCKAGE DES CODES ===
 with open("config.json", "r") as f:
@@ -30,16 +41,10 @@ def load_reservations():
     return sheet.get_all_records()
 
 def add_reservation(res_id, user_id, username, salle, date, heure, duree):
-    """
-    Ajoute une réservation dans la feuille. S'assure que l'ID n'existe pas déjà.
-    """
-    # sécuriser les types
     res_id = int(res_id)
-    # recharger les ids actuels
     data = load_reservations()
     existing = {str(r.get("id")) for r in data}
 
-    # si l'id est pris (peu probable si get_new_id() est utilisé), on incrémente jusqu'à trouver un libre
     while str(res_id) in existing:
         res_id += 1
 
@@ -53,10 +58,6 @@ def delete_reservation(res_id):
             break
 
 def get_new_id():
-    """
-    Renvoie un ID entier unique : max(id existants) + 1.
-    - Ignore les ids non-entiers.
-    """
     data = load_reservations()
     max_id = 0
     for r in data:
@@ -69,14 +70,12 @@ def get_new_id():
     return max_id + 1
 
 def salle_disponible(salle, date, heure, duree):
-    # start et end aware
     start = tz.localize(datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M"))
     end = start + timedelta(hours=duree)
     for r in load_reservations():
         try:
             r_start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
         except Exception:
-            # si format invalide dans la feuille, on skip (ou on peut log)
             continue
         r_end = r_start + timedelta(hours=int(r['duree']))
         if str(r["salle"]) == salle and not (end <= r_start or start >= r_end):
@@ -91,9 +90,7 @@ def format_reservations_embed(reservations, titre):
     grouped = {}
     for r in reservations:
         salle = str(r['salle'])
-        if salle not in grouped:
-            grouped[salle] = []
-        grouped[salle].append(r)
+        grouped.setdefault(salle, []).append(r)
 
     for salle in grouped:
         grouped[salle].sort(
@@ -111,7 +108,7 @@ def format_reservations_embed(reservations, titre):
 # === EVENTS ===
 @bot.event
 async def on_ready():
-    print(f"Connecté en tant que {bot.user}")
+    print(f"✅ Connecté en tant que {bot.user}")
 
 # === COMMANDES ===
 @bot.command()
@@ -119,26 +116,18 @@ async def reserver(ctx, salle: str, date: str, heure: str, duree: int):
     if salle not in codes:
         return await ctx.send("❌ Salle invalide (Sevenans ou Belfort).")
 
-    # validation de la date/heure (format attendu)
     try:
         start = tz.localize(datetime.strptime(f"{date} {heure}", "%Y-%m-%d %H:%M"))
     except ValueError:
         return await ctx.send("❌ Format date/heure invalide. Utilise : YYYY-MM-DD HH:MM")
 
     now = datetime.now(tz)
-
-    # Interdire réservation dans le passé
     if start < now:
         return await ctx.send("❌ Impossible de réserver pour une date/heure déjà passée.")
-
-    # Interdire réservation à plus d'une semaine
     if start > now + timedelta(days=7):
         return await ctx.send("❌ Impossible de réserver à plus d'une semaine d'avance.")
-
-    # Vérifier durée positive
     if duree <= 0:
         return await ctx.send("❌ Durée invalide (doit être > 0).")
-
     if not salle_disponible(salle, date, heure, duree):
         return await ctx.send("❌ Cette salle est déjà réservée à ce créneau.")
 
@@ -172,7 +161,7 @@ async def historique(ctx):
     data = load_reservations()
     now = datetime.now(tz)
     past_reservations = []
-    # Suppression des réservations passées depuis plus de 7 jours
+
     for r in data:
         try:
             start = tz.localize(datetime.strptime(f"{r['date']} {r['heure']}", "%Y-%m-%d %H:%M"))
@@ -227,14 +216,13 @@ def save_codes():
 @commands.has_permissions(administrator=True)
 async def setcode(ctx, salle: str, code: str):
     if salle not in codes:
-        return await ctx.send("❌ Salle invalide")
+        return await ctx.send("❌ Salle invalide.")
     codes[salle] = code
     save_codes()
     await ctx.send(f"🔑 Code de la salle {salle} mis à jour.")
 
 @bot.command()
 async def code(ctx):
-    """Envoie le code si ta réservation commence dans <1h ou si elle est en cours."""
     now = datetime.now(tz)
     data = load_reservations()
 
@@ -259,7 +247,6 @@ async def code(ctx):
                 return await ctx.send("❌ Impossible de t’envoyer un DM, vérifie tes paramètres Discord.")
 
     await ctx.send("❌ Tu n’as aucune réservation à venir dans l’heure ou en cours.")
-
 
 if __name__ == "__main__":
     bot.run(TOKEN)
