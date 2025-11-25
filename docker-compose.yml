@@ -8,4 +8,5 @@ services:
     env_file:
       - .env
     volumes:
-      - .:/app
+      - ./credentials.json:/app/credentials.json:ro
+      - ./config.json:/app/config.json    
